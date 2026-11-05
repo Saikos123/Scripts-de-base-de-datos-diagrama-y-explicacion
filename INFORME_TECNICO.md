@@ -1,7 +1,9 @@
 # Informe técnico: base de datos de Proyecto Alpha
 
 **Fecha de revisión:** 5 de noviembre de 2026
-**Alcance:** `script.sql` y exportación DrawSQL incluida en `docs/`.
+
+**Alcance:** `script.sql` y exportación `supabase-schema.svg` incluida en `docs/`.
+
 **Destino previsto:** prototipo en Supabase.
 
 ## 1. Resumen ejecutivo
@@ -19,9 +21,10 @@ para producción ni como auditado de extremo a extremo. La autorización del
 backend, RLS, los privilegios de los esquemas y las operaciones de negocio deben
 probarse con la cuenta de conexión real.
 
-La imagen DrawSQL sirve para explicar las entidades principales, pero **no
-coincide por completo con la versión vigente del SQL**. Debe actualizarse antes
-de tratarla como diagrama definitivo.
+La exportación de Supabase refleja las tablas y relaciones que aparecen en el
+proyecto al momento de exportarla, pero **no coincide por completo con la
+versión vigente del SQL**. Se conserva como evidencia del estado observado y
+se detallan abajo las diferencias pendientes.
 
 ## 2. Qué contiene el script
 
@@ -125,29 +128,54 @@ dos bases distintas (una SQL y otra NoSQL), `JSONB` no equivale a una segunda
 base: habría que confirmar el requisito con el profesor y justificar e
 implementar otro almacén por separado.
 
-## 4. Revisión de la imagen DrawSQL
+## 4. Revisión de la exportación de Supabase
 
-La imagen muestra las entidades centrales y, a nivel general, permite explicar
-el flujo de inventario. Sin embargo, no debe rotularse como copia exacta del
-script actual:
+La exportación `docs/supabase-schema.svg` incluye las entidades centrales y
+permite seguir visualmente las principales relaciones. Los nombres de tabla y
+las relaciones visibles coinciden en general con el modelo SQL. Se identifican
+15 nodos de tablas, mientras el script define 16.
 
-1. Falta la columna `proveedores.activo BOOLEAN NOT NULL DEFAULT TRUE`, presente
-   en el SQL vigente para permitir una baja lógica.
-2. La imagen representa varios campos como tipos `ENUM`, incluidos estados de
-   documentos y movimientos. En el SQL actual esos campos son `VARCHAR` con
-   restricciones `CHECK`, no tipos `ENUM` de PostgreSQL.
-3. La acción de `auditoria_operaciones` también se representa como enum en el
-   dibujo; el SQL la declara `VARCHAR(10)` limitada por `CHECK`.
-4. `auditoria_usuarios.usuario_id` no tiene clave foránea en el SQL. Esto permite
-   conservar el historial aunque la cuenta deje de existir. Si el diagrama
-   dibuja una FK en esa relación, hay que quitarla o modificar el SQL de forma
-   deliberada; no conviene que ambos documentos se contradigan.
+1. **Falta `tokens_revocados`.** El SQL sí crea esa tabla y una FK hacia
+   `usuarios`. La exportación muestra un conector hacia `usuarios` desde un nodo
+   que no aparece, por lo que la relación queda huérfana en el dibujo.
+2. **Falta `proveedores.activo`.** El SQL vigente incluye esa columna para
+   desactivar proveedores sin borrar su historial. Si el proyecto Supabase debía
+   tener ya esa columna, hay que aplicar o confirmar la migración y volver a
+   exportar el esquema.
+3. La exportación representa los campos de estado y movimiento como
+   `varchar`, coherente con el SQL, que usa `VARCHAR` con `CHECK` en vez de
+   tipos PostgreSQL `ENUM`. La vista del esquema no expone en la imagen las
+   precisiones numéricas, nulabilidad, valores por defecto ni todas las
+   restricciones; para esos detalles el script SQL sigue siendo la referencia.
+4. `auditoria_usuarios.usuario_id` no tiene FK a `usuarios` en el SQL, lo que
+   permite preservar el historial independientemente de la cuenta. La exportación
+   no muestra una relación entre esas tablas, coherente con la definición SQL.
 
-**Conclusión del diagrama:** es una buena vista general, pero está
-desactualizado en tipos y en la columna de proveedor. Actualizarlo desde DrawSQL
-usando el SQL vigente y volver a exportarlo antes de presentarlo como definitivo.
-La imagen incluida aquí queda identificada como referencia pendiente de esa
-sincronización.
+**Conclusión:** este diagrama es una mejor referencia del esquema actualmente
+observado en Supabase que la exportación anterior de DrawSQL. Todavía no debe
+presentarse como una representación completa del SQL: primero hay que resolver
+la tabla de tokens ausente y la columna `proveedores.activo`, y luego generar
+una nueva exportación.
+
+Para comprobar si la diferencia está en la base desplegada o solo en la
+exportación, ejecutar en el SQL Editor:
+
+```sql
+SELECT to_regclass('public.tokens_revocados') AS tabla_tokens_revocados;
+
+SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'proveedores'
+      AND column_name = 'activo'
+) AS proveedores_tiene_activo;
+```
+
+La primera consulta debe devolver `tokens_revocados`; la segunda, `true`. Si
+falla alguna, actualizar el proyecto beta con el SQL correspondiente y volver
+a exportar el esquema. Si ambas pasan pero no aparecen en el SVG, generar la
+exportación de nuevo desde el mismo proyecto y esquema (`public`).
 
 ## 5. Seguridad: qué hay y qué falta
 
