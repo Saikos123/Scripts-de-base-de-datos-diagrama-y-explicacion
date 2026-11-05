@@ -7,6 +7,7 @@ controles y los puntos que todavía deben validarse.
 - [Script SQL](./script.sql)
 - [Informe técnico y revisión del diagrama](./INFORME_TECNICO.md)
 - [Esquema exportado desde Supabase](./docs/supabase-schema.svg)
+- [Guía paso a paso para probar Supabase y la API con Bruno](./GUIA_PRUEBA_SUPABASE_BRUNO.md)
 
 ## Antes de ejecutar
 
