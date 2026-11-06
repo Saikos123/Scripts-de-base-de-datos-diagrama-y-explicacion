@@ -1,5 +1,5 @@
 -- ============================================================================
--- PROYECTO ALPHA (FYAG SpA) - ESQUEMA POSTGRESQL PARA SUPABASE
+-- PROYECTO ALPHA (FYAG SpA) - ESQUEMA POSTGRESQL 
 -- ============================================================================
 
 -- Ejecutar en la base de datos de desarrollo prevista para Alpha. Este script
