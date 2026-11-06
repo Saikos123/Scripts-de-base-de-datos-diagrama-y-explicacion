@@ -2,19 +2,23 @@
 -- PROYECTO ALPHA (FYAG SpA) - ESQUEMA POSTGRESQL 
 -- ============================================================================
 
--- Ejecutar en la base de datos de desarrollo prevista para Alpha. Este script
--- crea el esquema inicial; IF NOT EXISTS no migra tablas de versiones previas.
--- Las fechas se almacenan como TIMESTAMPTZ. La aplicación debe convertirlas
--- a America/Santiago al mostrarlas; no se cambia la configuración global de Supabase.
--- El backend debe validar el JWT y los permisos del usuario, y establecer
--- app.current_user_id con SET LOCAL dentro de cada transacción. Esta identidad
--- de sesión no autentica por sí sola al usuario: alpha_backend solo debe usarse
--- desde el backend confiable y nunca desde el navegador.
--- Las funciones SECURITY DEFINER incluyen public en su search_path; no conceder
--- CREATE en ese esquema a roles no confiables.
--- Los JSONB de evidencia/DTE almacenan metadatos y rutas de Supabase Storage,
--- no archivos binarios ni URLs firmadas de corta duración. Definir retención
--- legalmente antes de anonimizar datos; la operación no modifica respaldos.
+-- Alcance y condiciones de instalación:
+-- Este archivo crea el esquema inicial para una base de desarrollo de Alpha.
+-- IF NOT EXISTS no actualiza tablas que ya existan con otra estructura; las
+-- actualizaciones posteriores requieren migraciones controladas.
+-- Las fechas se almacenan como TIMESTAMPTZ. La capa de presentación convierte
+-- los valores a America/Santiago; no se modifica la configuración global de
+-- Supabase.
+-- El backend valida JWT y permisos, y establece app.current_user_id con
+-- SET LOCAL en cada transacción. Este identificador de sesión no autentica por
+-- sí solo al usuario. alpha_backend se utiliza desde el backend confiable, no
+-- desde el navegador.
+-- Las funciones SECURITY DEFINER incluyen public en su search_path. El esquema
+-- no debe conceder CREATE a roles no confiables.
+-- Los JSONB de evidencia y DTE almacenan metadatos y rutas de Supabase Storage,
+-- no archivos binarios ni URLs firmadas de corta duración. La política de
+-- retención debe definirse antes de anonimizar datos; la operación no modifica
+-- respaldos.
 
 -- Necesaria para calcular SHA-256 y generar una contraseña aleatoria al anonimizar.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -1438,7 +1442,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public, extensions, pg_temp;
 
--- Elimina tokens revocados ya vencidos; debe llamarse con permiso de administración.
+-- Eliminación de tokens revocados vencidos; requiere permiso de administración.
 CREATE OR REPLACE FUNCTION fn_limpiar_tokens_expirados()
 RETURNS INT AS $$
 DECLARE

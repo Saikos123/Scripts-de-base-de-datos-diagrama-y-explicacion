@@ -26,7 +26,7 @@ proyecto al momento de exportarla, pero **no coincide por completo con la
 versión vigente del SQL**. Se conserva como evidencia del estado observado y
 se detallan abajo las diferencias pendientes.
 
-## 2. Qué contiene el script
+## 2. Estructura y componentes del script
 
 El archivo define **16 tablas, 21 funciones, 2 vistas y triggers**. Las
 sentencias crean el esquema, insertan roles, permisos y categorías iniciales,
@@ -103,7 +103,7 @@ fallida.
 - El script carga cuatro roles, catorce permisos y ocho categorías. No crea
   proveedores, artículos, obras ni un administrador con contraseña conocida.
 
-## 3. Por qué se usa `JSONB`
+## 3. Uso de `JSONB`
 
 `JSONB` guarda datos que llegan con forma variable sin abandonar las tablas
 relacionales ni sus claves foráneas:
@@ -125,8 +125,9 @@ script no crea buckets ni políticas de Storage.
 Si el requisito académico es una solución híbrida, este diseño permite
 describir un **modelo híbrido dentro de PostgreSQL**. Si se exigieran literalmente
 dos bases distintas (una SQL y otra NoSQL), `JSONB` no equivale a una segunda
-base: habría que confirmar el requisito con el profesor y justificar e
-implementar otro almacén por separado.
+base. La clasificación final debe contrastarse con el requisito académico
+establecido. Si este exige dos almacenes independientes, será necesario
+justificar e incorporar un segundo sistema de persistencia.
 
 ## 4. Revisión de la exportación de Supabase
 
@@ -139,9 +140,9 @@ las relaciones visibles coinciden en general con el modelo SQL. Se identifican
    `usuarios`. La exportación muestra un conector hacia `usuarios` desde un nodo
    que no aparece, por lo que la relación queda huérfana en el dibujo.
 2. **Falta `proveedores.activo`.** El SQL vigente incluye esa columna para
-   desactivar proveedores sin borrar su historial. Si el proyecto Supabase debía
-   tener ya esa columna, hay que aplicar o confirmar la migración y volver a
-   exportar el esquema.
+   desactivar proveedores sin borrar su historial. Si la base desplegada debía
+   incluirla, corresponde confirmar la migración aplicada y volver a exportar el
+   esquema.
 3. La exportación representa los campos de estado y movimiento como
    `varchar`, coherente con el SQL, que usa `VARCHAR` con `CHECK` en vez de
    tipos PostgreSQL `ENUM`. La vista del esquema no expone en la imagen las
@@ -151,14 +152,15 @@ las relaciones visibles coinciden en general con el modelo SQL. Se identifican
    permite preservar el historial independientemente de la cuenta. La exportación
    no muestra una relación entre esas tablas, coherente con la definición SQL.
 
-**Conclusión:** este diagrama es una mejor referencia del esquema actualmente
-observado en Supabase que la exportación anterior de DrawSQL. Todavía no debe
-presentarse como una representación completa del SQL: primero hay que resolver
-la tabla de tokens ausente y la columna `proveedores.activo`, y luego generar
-una nueva exportación.
+**Conclusión:** este diagrama representa el esquema observado en Supabase con
+mayor fidelidad que la exportación anterior de DrawSQL. Aún no representa todo
+el SQL vigente, debido a la tabla de tokens ausente y a la columna
+`proveedores.activo`. La versión completa requiere resolver ambas diferencias y
+generar una nueva exportación.
 
-Para comprobar si la diferencia está en la base desplegada o solo en la
-exportación, ejecutar en el SQL Editor:
+La siguiente verificación permite determinar si las diferencias están en la
+base desplegada o únicamente en la exportación. Las consultas se ejecutan en el
+SQL Editor del proyecto correspondiente:
 
 ```sql
 SELECT to_regclass('public.tokens_revocados') AS tabla_tokens_revocados;
@@ -172,10 +174,11 @@ SELECT EXISTS (
 ) AS proveedores_tiene_activo;
 ```
 
-La primera consulta debe devolver `tokens_revocados`; la segunda, `true`. Si
-falla alguna, actualizar el proyecto beta con el SQL correspondiente y volver
-a exportar el esquema. Si ambas pasan pero no aparecen en el SVG, generar la
-exportación de nuevo desde el mismo proyecto y esquema (`public`).
+El resultado esperado es `tokens_revocados` para la primera consulta y `true`
+para la segunda. Si alguno de esos resultados no se obtiene, la base requiere
+la actualización SQL correspondiente antes de volver a exportar. Si ambos
+resultados son correctos y el SVG no refleja esos objetos, la exportación debe
+regenerarse desde el mismo proyecto y el esquema `public`.
 
 ## 5. Seguridad: qué hay y qué falta
 
@@ -199,24 +202,26 @@ exportación de nuevo desde el mismo proyecto y esquema (`public`).
 
 - **El script no habilita RLS.** El acceso se basa en privilegios SQL y en que la
   aplicación use una conexión confiable. No se debe conectar el navegador
-  directamente con credenciales privilegiadas. Si se pretende usar Supabase
-  REST/PostgREST desde clientes, hay que diseñar y probar políticas RLS.
+  directamente con credenciales privilegiadas. El acceso desde clientes a
+  través de Supabase REST/PostgREST requiere políticas RLS diseñadas y probadas.
 - `fn_exigir_permiso` confía en `app.current_user_id`. Esa variable no valida un
   JWT por sí sola. El backend debe validar el token, resolver el usuario
   autenticado y establecer la variable con `SET LOCAL` en cada transacción. No
   debe aceptar un ID de actor enviado libremente por el cliente.
 - Las funciones `SECURITY DEFINER` incluyen `public` en su `search_path`.
-  Verificar que ningún rol no confiable pueda crear objetos en ese esquema y
-  probar los permisos efectivos del proyecto Supabase. Endurecer más el
-  `search_path` o cualificar objetos cuando sea posible.
+  La revisión de seguridad debe confirmar que ningún rol no confiable pueda
+  crear objetos en ese esquema y debe comprobar los permisos efectivos del
+  proyecto Supabase. Como refuerzo, se recomienda restringir el `search_path` o
+  cualificar los objetos cuando sea posible.
 - El backend recibe escritura directa en categorías, proveedores y obras. La
   autorización por usuario en esas operaciones depende del backend; el rol SQL
   compartido no conoce automáticamente el rol funcional de cada persona.
 - La auditoría de usuarios solo guarda `rol_id` y `activo` en los JSON de antes y
   después. Cambios de correo, RUT, nombre o contraseña disparan un evento
   `UPDATE`, pero sus valores no quedan registrados. Es una decisión de
-  minimización de datos que debe documentarse; si se necesita auditar qué cambió,
-  definir una lista segura de campos o eventos.
+  minimización de datos que debe documentarse. Si el requisito incluye identificar
+  esos cambios, corresponde definir una lista permitida de campos o eventos que
+  no exponga credenciales ni datos innecesarios.
 - La auditoría operativa excluye la clave `nombre` de todas las tablas, además de
   otros campos. Esto reduce exposición de datos, pero también puede ocultar
   cambios de nombres de obras, categorías u otros datos no personales.
@@ -239,63 +244,76 @@ secuencias, funciones y `pgcrypto`) y hace referencia a roles de Supabase
 (`anon`, `authenticated`, `service_role`). Por eso no es un script genérico para
 cualquier motor SQL ni una aplicación NoSQL.
 
-Para una beta aislada es apropiado si se usa un proyecto de desarrollo, una
-conexión exclusiva del backend, credenciales fuera del repositorio y datos
-ficticios. `alpha_backend` es un rol sin inicio de sesión; el administrador debe
-concederlo al rol real de conexión usado por el servidor. El script no crea la
-contraseña ni el usuario de conexión.
+Para una beta aislada, la configuración apropiada incluye un proyecto de
+desarrollo, una conexión exclusiva del backend, credenciales fuera del
+repositorio y datos ficticios. `alpha_backend` es un rol sin inicio de sesión;
+la administración del proyecto debe concederlo al rol real de conexión del
+servidor. El script no crea la contraseña ni el usuario de conexión.
 
-El backend actual todavía debe conectarse a PostgreSQL y alinearse con el
-contrato. Debe usarse un único proceso de inicialización ORM, cargar todos los
-módulos necesarios y no ejecutar `generate_schemas()` como sustituto de este
-script: el ORM no genera automáticamente las funciones, triggers, permisos ni
-reglas de negocio aquí definidos.
+La integración del backend requiere conectarse a PostgreSQL y alinearse con el
+contrato de datos. La inicialización ORM debe ser única y registrar todos los
+módulos necesarios. `generate_schemas()` no sustituye este script: el ORM no
+genera automáticamente las funciones, triggers, permisos ni reglas de negocio
+definidos aquí.
 
 ## 7. Instalación, actualización y pruebas pendientes
 
 `CREATE TABLE IF NOT EXISTS` permite crear tablas faltantes, pero **no migra**
-tablas que ya existan con otra estructura. La beta creada antes de agregar
-`proveedores.activo` necesita esta actualización, si aún no se aplicó:
+tablas que ya existan con otra estructura. En instalaciones creadas antes de
+incorporar `proveedores.activo`, la actualización siguiente debe aplicarse si
+la columna aún no existe:
 
 ```sql
 ALTER TABLE public.proveedores
 ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT TRUE;
 ```
 
-Las capturas compartidas durante la prueba confirmaron tablas y relaciones
-visibles, roles/permisos, las dos vistas y las ocho categorías. La validación
-estática de este archivo aceptó 121 sentencias SQL. Eso no equivale a probar cada
-función y trigger: no se ejecutó aquí una batería PostgreSQL desde una cuenta
-`alpha_backend`.
+La evidencia visual disponible confirmó tablas y relaciones visibles, los
+roles y permisos, las dos vistas y las ocho categorías. La validación estática
+aceptó 121 sentencias SQL. Estos resultados no prueban cada función ni trigger:
+no se ejecutó una batería PostgreSQL con una cuenta `alpha_backend`.
 
-Antes de usar datos reales, probar en la beta:
+La validación funcional previa al uso de datos reales debe realizarse en un
+entorno beta. La secuencia recomendada es:
 
-1. conexión del backend con TLS, credenciales solo del servidor y privilegios
-   efectivos de `alpha_backend`;
-2. rechazo de RUT/correo inválidos, cantidades negativas, totales incorrectos y
-   documentos duplicados;
-3. compra válida y fallida: líneas, descuentos, IVA, saldo y costo promedio;
-4. egreso válido y fallido por stock insuficiente, y reversión de la operación
-   sin cambios parciales;
-5. devoluciones vinculadas al movimiento original y con límite de cantidad;
-6. bloqueo de edición/borrado del Cardex, auditorías y documentos registrados;
-7. autorización por rol en cada operación y por cada ruta del backend;
-8. auditorías: valores que se registran, valores omitidos y actor identificado;
-9. restricciones de acceso desde roles Supabase cliente y desde la conexión de
-   backend;
-10. respaldo y restauración en un proyecto de prueba.
+1. **Conectividad y privilegios:** comprobar TLS, el uso exclusivo de
+   credenciales del servidor y los privilegios efectivos de `alpha_backend`.
+2. **Validación de entradas:** confirmar el rechazo de RUT y correos inválidos,
+   cantidades negativas, totales incorrectos y documentos duplicados.
+3. **Compras e inventario:** verificar compras válidas y fallidas, incluyendo
+   líneas, descuentos, IVA, saldo y costo promedio.
+4. **Egresos y atomicidad:** probar egresos válidos y rechazos por stock
+   insuficiente; confirmar que los fallos no dejan cambios parciales.
+5. **Devoluciones:** comprobar su vínculo con el movimiento original y los
+   límites de cantidad.
+6. **Inmutabilidad:** validar el bloqueo de edición y borrado del Cardex,
+   auditorías y documentos registrados.
+7. **Autorización:** verificar permisos por rol para cada operación y ruta del
+   backend.
+8. **Auditoría:** comprobar los datos registrados, los omitidos y la
+   identificación del actor.
+9. **Aislamiento de acceso:** probar los permisos desde roles cliente de
+   Supabase y desde la conexión del backend.
+10. **Recuperación:** comprobar respaldo y restauración en un proyecto de
+    prueba.
 
 El editor SQL de Supabase suele operar con privilegios administrativos y no es
-una prueba de permisos de la aplicación. Las pruebas de autorización deben
-ejecutarse con el rol de conexión previsto y mediante el backend.
+una prueba de permisos de la aplicación. La autorización se valida con el rol
+de conexión previsto y mediante el backend.
 
-## 8. Explicación breve para el equipo
+## 8. Síntesis arquitectónica
 
-> “El inventario y los documentos son relacionales para asegurar referencias,
-> cálculos y transacciones. Usamos JSONB solo para metadatos cuyo formato cambia,
-> como especificaciones, DTE y referencias de evidencia; los archivos se guardan
-> en Storage. El Cardex conserva cada movimiento y las correcciones se agregan
-> como reversas. Supabase aporta PostgreSQL administrado, pero la seguridad de
-> usuarios depende de que el backend valide el JWT y establezca el actor por
-> transacción. El diagrama se mantiene alineado con el SQL y las funciones se
-> prueban con un rol real de backend.”
+El esquema mantiene en tablas relacionales la información que participa en
+claves foráneas, cálculos, permisos e informes. `JSONB` se reserva para
+metadatos de estructura variable, como especificaciones, DTE y referencias a
+evidencia; los archivos binarios requieren almacenamiento de objetos separado.
+
+El Cardex conserva la secuencia de movimientos de inventario. Las correcciones
+se representan mediante movimientos de reversa, sin alterar los registros
+originales. Supabase proporciona PostgreSQL administrado, mientras que la
+autenticación de usuarios y la identificación del actor por transacción
+corresponden a la integración del backend.
+
+La consistencia del sistema depende de mantener el diagrama alineado con el
+SQL vigente y de validar las funciones con los privilegios efectivos de la
+conexión de backend.
