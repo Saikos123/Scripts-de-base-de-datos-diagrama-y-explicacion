@@ -39,6 +39,30 @@ El archivo [`script.sql`](./script.sql) crea el esquema inicial; no es una
 migración para actualizar una base existente. `CREATE TABLE IF NOT EXISTS` no
 cambia una tabla creada previamente con otra estructura.
 
+Si el proyecto ya tiene la base creada con el script original, no vuelvas a
+ejecutar `script.sql`. Primero realiza y comprueba un backup restaurable; compara
+el esquema y prueba únicamente las migraciones necesarias en una copia. La
+migración [`migracion_proyecto1_compras.sql`](./migracion_proyecto1_compras.sql)
+corresponde a una versión anterior: el `script.sql` actual ya contiene esos
+componentes, por lo que no se debe aplicar a ciegas.
+
+Para una instalación nueva, el script base crea 21 tablas. La migración
+[`migracion_proyecto1_solicitudes_y_acuses.sql`](./migracion_proyecto1_solicitudes_y_acuses.sql)
+agrega tres tablas de solicitudes y acuses. Si ya fue aplicada, la migración
+[`migracion_proyecto1_acuse_despues_despacho.sql`](./migracion_proyecto1_acuse_despues_despacho.sql)
+permite registrar primero el despacho y después el acuse. No reejecutar
+migraciones ya aplicadas solo para “asegurarse”.
+
+Después de aplicar el esquema y las migraciones aprobadas, ejecuta:
+
+```sql
+SELECT * FROM fn_verificar_integridad_cardex();
+```
+
+Solo continúa si `integro` es `true`. Si devuelve `false`, no se reescriben los
+movimientos históricos: detén la puesta en producción y revisa el primer ID
+informado antes de cualquier reparación.
+
 1. Abrir **SQL Editor** en el proyecto beta.
 2. Crear una consulta nueva e incorporar el contenido completo de `script.sql`.
 3. Confirmar que el proyecto seleccionado es el entorno beta y ejecutar el
@@ -80,8 +104,11 @@ FROM pg_catalog.pg_roles
 WHERE rolname = 'alpha_backend';
 ```
 
-Resultados esperados: **16** tablas, `tokens_revocados`, `true` para
-`proveedores_tiene_activo`, y `alpha_backend` con `rolcanlogin = false`.
+Resultados esperados para el esquema base actual: **21** tablas,
+`tokens_revocados`, `true` para `proveedores_tiene_activo`, y `alpha_backend`
+con `rolcanlogin = false`. Después de la migración de solicitudes/acuses deben
+existir además `solicitudes_materiales`, `detalle_solicitud_materiales` y
+`acuses_recepcion_egreso` (24 tablas públicas en total, sin contar vistas).
 Ante cualquier discrepancia, posponer la conexión del backend y comparar los
 resultados con el script. Si corresponde, generar una nueva exportación del
 esquema.
@@ -100,7 +127,24 @@ El resultado esperado es `true` y `false`, respectivamente. `cardex` se lee
 directamente, pero sus movimientos se escriben por las funciones previstas en
 el script.
 
-## 4. Preparar la conexión del backend (siguiente etapa)
+## 4. Configurar y comprobar el Storage privado
+
+El acuse firmado se guarda como archivo en Supabase Storage; PostgreSQL conserva
+el bucket y la ruta. El usuario confirmó la existencia de `acuse-recepcion` con
+`public = false`. Para comprobarlo:
+
+```sql
+SELECT id, name, public
+FROM storage.buckets
+WHERE id = 'acuse-recepcion';
+```
+
+La aplicación debe subir el archivo desde el backend y solo después registrar
+sus metadatos con `fn_registrar_acuse_recepcion_egreso`. No poner credenciales
+de Storage en el navegador. Si se habilita subida/lectura directa por clientes,
+crear y probar políticas Storage limitadas; no hacer público el bucket.
+
+## 5. Preparar la conexión del backend (siguiente etapa)
 
 Una vez verificado el esquema beta, configurar la conexión del backend según
 la siguiente secuencia:
@@ -136,7 +180,7 @@ HTTP, no directamente con PostgreSQL. En la versión de referencia que utiliza
 SQLite, los pasos 4–6 requieren adaptar y revisar el código antes de considerar
 que la API está probando Supabase.
 
-## 5. Instalar y usar Bruno para probar la API
+## 6. Instalar y usar Bruno para probar la API
 
 Bruno permite probar las rutas del backend y conservar colecciones de pruebas
 compartibles. La aplicación puede descargarse desde la
@@ -169,11 +213,14 @@ cualquier cuenta de administrador de demostración o credencial fija presente
 en el código. Utilizar una cuenta de prueba con una contraseña nueva y no
 publicar valores predeterminados.
 
-## 6. Límites de seguridad para esta beta
+## 7. Límites de seguridad para esta beta
 
-- El SQL actual no habilita RLS. Mantener el acceso a la base detrás del
-  backend confiable; no exponer tablas mediante la API de Supabase hasta
-  diseñar y probar RLS y sus políticas.
+- En las tablas `public`, el diseño aplicado mantiene RLS desactivado y depende
+  de grants/revokes de mínimo privilegio y del backend confiable. No exponer
+  tablas mediante la API de Supabase a clientes; si se requiere acceso directo,
+  habilitar RLS y probar políticas antes de publicarlo.
+- Mantener RLS activado en las tablas internas de `storage` y usar el bucket
+  privado. Crear políticas Storage solo si los clientes acceden directamente.
 - El script revoca permisos de tablas a `anon`, `authenticated` y
   `service_role`; esas identidades no deben utilizarse para eludir los permisos
   previstos para el backend.
