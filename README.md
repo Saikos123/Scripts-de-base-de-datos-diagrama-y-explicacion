@@ -15,6 +15,8 @@ compras, obras, solicitudes de materiales, egresos, Kardex y acuses.
   permite registrar el despacho y luego el acuse de recepción.
 - [`INFORME_TECNICO.md`](./INFORME_TECNICO.md): alcance, decisiones y estado
   conocido de la base.
+- [`INFORME_TECNICO2.md`](./INFORME_TECNICO2.md): actualizacion,
+
 - [`CHECKLIST_PROYECTO1.md`](./CHECKLIST_PROYECTO1.md): avance, validaciones y
   pendientes.
 - [`GUIA_PRUEBA_SUPABASE_BRUNO.md`](./GUIA_PRUEBA_SUPABASE_BRUNO.md): guía de
