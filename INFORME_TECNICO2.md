@@ -1,33 +1,35 @@
-# Informe técnico — base de datos de Proyecto Alpha
+# Informe técnico: base de datos de Proyecto Alpha
 
-**Revisión:** 10 de noviembre de 2026
-**Alcance:** scripts SQL, migraciones y estado de Supabase informado por el
-usuario. No es una auditoría de seguridad ni certificación legal.
+**Fecha:** 10 de noviembre de 2026 · **Alcance:** esquema SQL, migraciones y
+configuración de Supabase revisada.
+
+Este informe resume lo implementado y los puntos que todavía deben probarse.
+No constituye una auditoría de seguridad ni una certificación legal.
 
 ## Resumen ejecutivo
 
-Se completó el **núcleo del esquema de base de datos** para inventario,
-proveedores/clientes, compras, egresos, Kardex, permisos y las solicitudes de
-materiales/acuses agregados en las migraciones. El usuario informó que ejecutó
-el script y las migraciones relevantes en Supabase. Las capturas compartidas
-confirman tablas de solicitudes/acuses, algunos permisos, RLS desactivado en
-`public` y el bucket privado `acuse-recepcion`; no inspeccionamos directamente
-el proyecto ni ejecutamos las pruebas de integración desde el backend.
+Se implementó el esquema de base de datos para usuarios y permisos,
+proveedores y clientes, compras, inventario, egresos y Kardex. Después se
+incorporaron las solicitudes de materiales, los acuses de recepción y la
+corrección para registrar el despacho antes de cargar el acuse. Estos cambios
+se aplicaron en Supabase. El bucket `acuse-recepcion` es privado y RLS está
+desactivado en las tablas del esquema `public`.
 
-Por lo tanto, el **diseño del núcleo está preparado para integración**, pero no
-se debe declarar terminado todo el sistema. Faltan pruebas con la conexión real
-del backend, verificación de permisos de extremo a extremo y el alcance de toma
-de inventario físico solicitado en HU-06.
+La base está preparada para comenzar la integración con el backend, pero esa
+integración aún debe realizarse y probarse. También falta definir si HU-06
+requiere guardar los conteos de inventario físico y sus diferencias.
 
 ## Componentes del esquema
 
-`script.sql` define 21 tablas, 34 funciones y 3 vistas. La migración
-`migracion_proyecto1_solicitudes_y_acuses.sql` agrega tres tablas, funciones de
-flujo y la vista de entregas sin acuse. La migración correctiva
-`migracion_proyecto1_acuse_despues_despacho.sql` quita la regla que exigía el
-acuse antes de registrar la salida. La migración de compras es para actualizar
-una versión anterior del esquema; no debe aplicarse automáticamente junto con
-el esquema base actual.
+El script base define 21 tablas, 34 funciones y 3 vistas. La migración de
+solicitudes agrega tres tablas, funciones para gestionar el flujo y una vista
+de egresos sin acuse. La migración correctiva permite registrar primero la
+salida y agregar el acuse después. En conjunto, el esquema actualizado contiene
+24 tablas, 43 funciones y 4 vistas.
+
+La migración de compras corresponde a una versión anterior del esquema y no
+debe ejecutarse encima del script base actual sin revisar antes qué objetos
+existen en la base.
 
 ### Entidades del script base
 
@@ -38,106 +40,113 @@ el esquema base actual.
   `cuentas_bancarias_proveedor`, `clientes`, `articulos` y `obras`.
 - **Compras e inventario:** `facturas_proveedor`, `detalle_factura`,
   `devoluciones_proveedor`, `egresos_obra`, `detalle_egreso` y `cardex`.
-- **Migración de solicitudes y acuses:** `solicitudes_materiales`,
+- **Solicitudes y acuses:** `solicitudes_materiales`,
   `detalle_solicitud_materiales` y `acuses_recepcion_egreso`.
 
-### Reglas principales implementadas
+### Reglas principales
 
-- Costeo por **promedio ponderado móvil (PMP)**; no FIFO.
-- Descuentos sucesivos en cascada, IVA y validación de totales.
-- Recepción por guía, conciliación con factura y control del stock reservado.
-- Egresos transaccionales con validación de stock y registro en Kardex.
-- Mermas, devoluciones, uso interno y ajustes como tipos de movimiento.
-- Kardex append-only con hash de integridad, verificación y movimientos de
-  reversa.
-- Roles y permisos comprobados por funciones de negocio, con grants/revokes
-  destinados al rol `alpha_backend`.
-- Solicitudes del Supervisor con aprobación/rechazo y relación con el egreso.
-- Acuse inmutable asociado al egreso; el archivo se guarda en Storage y la base
-  conserva la referencia y metadatos.
+- El inventario se valoriza mediante **promedio ponderado móvil (PMP)**, no
+  FIFO.
+- Los descuentos se aplican en cascada; se calculan y validan IVA y totales.
+- La recepción por guía reserva las cantidades hasta conciliarlas con la
+  factura.
+- Los egresos validan existencias y registran los movimientos en el Kardex
+  dentro de una transacción.
+- Mermas, devoluciones, uso interno y ajustes se representan como movimientos
+  de inventario.
+- El Kardex conserva los movimientos originales, calcula hashes encadenados y
+  permite verificar su integridad. Las correcciones se agregan como reversas.
+- Las funciones de negocio comprueban roles y permisos y están destinadas a
+  ejecutarse desde el rol `alpha_backend`.
+- Las solicitudes del Supervisor pueden aprobarse o rechazarse y asociarse a
+  un egreso.
+- El acuse queda asociado al egreso. El archivo firmado se guarda en Storage;
+  PostgreSQL conserva su referencia y metadatos.
 - `vw_stock_critico`, `vw_stock_despachable`, `vw_kardex_valorizado` y
-  `vw_egresos_sin_acuse` apoyan consultas del backend.
+  `vw_egresos_sin_acuse` cubren consultas de inventario y seguimiento.
 
-## Decisiones de integración y seguridad
+## Integración y seguridad
 
-- El diseño está orientado a un **backend privado** con conexión PostgreSQL.
-  `alpha_backend` es un rol `NOLOGIN`; la identidad de conexión del servidor
-  debe tener la membresía necesaria y usar solo credenciales almacenadas en el
-  servidor.
-- Las funciones que requieren permisos dependen de que el backend establezca
-  `app.current_user_id` dentro de cada transacción, después de autenticar al
-  actor. No se debe aceptar ese identificador directamente desde el cliente.
-- Según capturas compartidas, RLS está desactivado en tablas de `public` y no
-  hay políticas allí. Esto es coherente únicamente mientras el acceso a esas
-  tablas se mantenga detrás del backend y los permisos SQL sean correctos. Si
-  algún cliente accede directamente por Data API, hay que definir y probar
-  políticas RLS antes de habilitarlo.
-- El bucket `acuse-recepcion` fue confirmado como privado (`public = false`).
-  No se necesitan políticas para clientes si toda carga/lectura la hace el
-  servidor; cualquier acceso directo requiere políticas Storage de mínimo
-  privilegio.
-- El script no crea copias de seguridad ni garantiza su restauración. Se
-  requieren procedimientos de backup/restore independientes.
-- Una firma almacenada como imagen/archivo y metadatos es evidencia de recepción;
-  no debe describirse como firma electrónica certificada sin cumplir los
-  requisitos aplicables.
+- La aplicación debe conectarse mediante un **backend privado**. `alpha_backend`
+  es un rol `NOLOGIN`; la cuenta del servidor necesita la membresía
+  correspondiente y debe mantener sus credenciales fuera del cliente y del
+  repositorio.
+- Las funciones que requieren autorización usan `app.current_user_id`. El
+  backend debe validar la sesión y establecer esa variable dentro de cada
+  transacción. No debe aceptar el identificador del actor directamente desde
+  una petición del cliente.
+- RLS está desactivado en las tablas de `public` y no hay políticas RLS allí.
+  Esta configuración solo es adecuada si el acceso a esas tablas pasa por el
+  backend y los permisos SQL están correctamente limitados. Si se habilita el
+  acceso directo mediante Data API, habrá que diseñar y probar políticas RLS.
+- El bucket `acuse-recepcion` es privado (`public = false`). Si las cargas y
+  lecturas pasan por el servidor, no se necesitan políticas para clientes. Si
+  se habilita el acceso directo, las políticas de Storage deben limitarlo al
+  mínimo necesario.
+- El script no configura respaldos ni demuestra que puedan restaurarse. El
+  proceso de backup y recuperación debe probarse por separado.
+- El archivo firmado y sus metadatos sirven como evidencia de recepción; no
+  equivalen por sí solos a una firma electrónica certificada.
 
 ## Brechas respecto de la planificación HU-01 a HU-06
 
-1. **HU-01:** el esquema aporta usuarios, roles, permisos y tokens revocados;
-   falta validar la autenticación real del backend, establecer el actor por
-   transacción y probar autorización en cada ruta.
-2. **HU-02:** existen egresos y transacción SQL. La ruta actual del backend no
-   es compatible con el esquema: usa nombres de campos distintos y actualiza
-   stock directamente. Debe llamar las funciones SQL para no saltarse el Kardex
-   ni las validaciones.
-3. **HU-03:** el Cardex y sus vistas están implementados. Faltan endpoint de
-   consulta con filtros/paginación y generación de exportaciones si se mantienen
-   como requisito.
-4. **HU-04:** la base implementa compras, descuentos, PMP, documentos y
-   devoluciones; faltan endpoints e integración con las funciones transaccionales.
-5. **HU-05:** la base registra `AJUSTE_MERMA` y `USO_INTERNO` con motivo
-   obligatorio en el Kardex; no hace falta una tabla duplicada `mermas` si se
-   mantiene esta decisión. Falta integrar sus operaciones en el backend.
-6. **HU-06:** stock mínimo y alertas consultables existen, pero no hay tablas
-   para cabecera/detalle de toma física. Si se requiere persistir conteos y sus
-   diferencias, se debe acordar el flujo y diseñar una migración independiente.
-   La consulta de costos históricos y el endpoint de alertas también deben
-   integrarse y probarse.
+1. **HU-01 — Acceso:** están definidos usuarios, roles, permisos y tokens
+   revocados. Falta integrar la autenticación real del backend, establecer el
+   actor por transacción y probar la autorización en cada ruta.
+2. **HU-02 — Egresos:** el esquema permite registrar egresos transaccionales,
+   pero la ruta actual del backend no coincide con él: usa nombres de campos
+   distintos y actualiza el stock directamente. Debe llamar las funciones SQL
+   para aplicar las validaciones y actualizar el Kardex.
+3. **HU-03 — Kardex e informes:** el Kardex y sus vistas están implementados.
+   Faltan el endpoint de consulta con filtros y paginación, y las exportaciones
+   si siguen siendo requisito.
+4. **HU-04 — Compras:** la base cubre compras, descuentos, PMP, documentos y
+   devoluciones. Faltan los endpoints y su integración con las funciones
+   transaccionales.
+5. **HU-05 — Mermas y uso interno:** `AJUSTE_MERMA` y `USO_INTERNO` se registran
+   en el Kardex con un motivo obligatorio. No hace falta duplicar estos datos en
+   una tabla `mermas` mientras se mantenga este diseño; falta integrar las
+   operaciones en el backend.
+6. **HU-06 — Inventario físico y alertas:** existen el stock mínimo y consultas
+   de alertas, pero no hay tablas para registrar una toma física y sus
+   diferencias. Si se requiere conservar esos conteos, habrá que acordar el
+   flujo y preparar una migración. También faltan la consulta de costos
+   históricos y el endpoint de alertas en el backend.
 
-## Estado de validación
+## Comprobaciones y pendientes
 
-### Confirmado por el usuario/capturas
+### Configuración aplicada en Supabase
 
-- Se ejecutó el script base y se aplicaron las migraciones de solicitudes/acuses
-  y del orden despacho-acuse; el usuario confirmó que la correctiva funcionó.
-- Las tablas nuevas y permisos seleccionados aparecen en Supabase.
-- `alpha_backend` tiene los permisos SQL consultados para leer artículos y
+- Se aplicó el script base, la migración de solicitudes y acuses, y la
+  corrección del orden despacho-acuse.
+- Las tablas nuevas y los permisos consultados están presentes.
+- `alpha_backend` tiene los permisos SQL revisados para leer artículos y
   solicitudes, crear solicitudes y registrar acuses.
-- RLS aparece desactivado en `public`; la API Data está deshabilitada para las
-  tablas mostradas.
-- El bucket `acuse-recepcion` existe con `public = false`.
+- RLS está desactivado en `public`; la Data API está deshabilitada para las
+  tablas revisadas.
+- El bucket `acuse-recepcion` existe y es privado.
 
-### Aún por probar antes de producción
+### Pruebas que faltan
 
-- Conexión del backend como rol miembro de `alpha_backend`, sin usar `postgres`
-  ni exponer credenciales privilegiadas al navegador.
-- Ejecución de `SET LOCAL app.current_user_id` y matriz completa de permisos.
-- Flujo solicitud → aprobación → egreso/actualización de stock/Kardex →
-  carga del archivo → registro del acuse posterior.
-- Rechazo de operaciones inválidas, stock insuficiente, rollback, concurrencia
-  y ausencia de escrituras ORM directas que eludan funciones.
-- Resultado de `SELECT * FROM fn_verificar_integridad_cardex();` en Supabase.
-- Backup real y restauración probada.
-- Revisión de configuración `search_path`, privilegios heredados, políticas
-  Storage si hay acceso desde cliente y actualización del diagrama.
+- Conectar el backend como miembro de `alpha_backend`, sin usar `postgres` ni
+  exponer credenciales privilegiadas al navegador.
+- Probar `SET LOCAL app.current_user_id` y la matriz completa de permisos.
+- Recorrer el flujo solicitud → aprobación → egreso y actualización de
+  inventario/Kardex → carga del archivo → registro posterior del acuse.
+- Probar entradas inválidas, stock insuficiente, rollback y concurrencia.
+- Confirmar que el ORM no escriba directamente datos que deban pasar por las
+  funciones SQL.
+- Ejecutar `SELECT * FROM fn_verificar_integridad_cardex();` en Supabase.
+- Hacer un respaldo y comprobar su restauración en un entorno de prueba.
+- Revisar `search_path`, privilegios heredados, políticas de Storage si se
+  habilita acceso desde clientes y actualizar el diagrama.
 
-## Conclusión
+## Estado actual
 
-**El núcleo de la base de datos está diseñado y, según lo informado, desplegado
-en Supabase con sus migraciones recientes y bucket privado.** Esto permite que
-el equipo empiece la integración en una rama de trabajo, pero no demuestra que
-el backend sea todavía compatible ni que todas las historias HU-01 a HU-06 estén
-terminadas. La toma de inventario físico, la integración del backend y las
-pruebas de entorno siguen pendientes. No se afirma cumplimiento legal ni
-preparación de producción.
+El esquema y las migraciones indicadas están aplicados en Supabase, y el bucket
+de acuses es privado. El siguiente paso es integrar el backend de forma que use
+las funciones y controles definidos en SQL, y probar los flujos con los
+permisos de conexión previstos. También quedan pendientes las decisiones de
+HU-06, la verificación de integridad del Kardex y una restauración de respaldo.
+Por ahora, no corresponde considerar terminadas todas las historias ni declarar
+el sistema listo para producción.
